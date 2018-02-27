@@ -1,0 +1,22 @@
+{
+  "name": "yarn-workspace-isolator",
+  "version": "0.0.0",
+  "license": "MIT",
+  "author": {
+    "name": "Christian Hoffmeister",
+    "email": "mail@choffmeister.de"
+  },
+  "bin": {
+    "isolate-workspace": "./bin/isolate-workspace"
+  },
+  "dependencies": {
+    "glob": "^7.1.2",
+    "lodash": "^4.17.5",
+    "randomstring": "^1.1.5",
+    "yargs": "^11.0.0"
+  },
+  "engines": {
+    "node": ">=8.0.0",
+    "yarn": ">=1.0.0"
+  }
+}
