@@ -10,13 +10,12 @@
     "isolate-workspace": "./bin/isolate-workspace"
   },
   "dependencies": {
-    "glob": "^7.1.2",
+    "copy-dir": "^0.3.0",
     "lodash": "^4.17.5",
-    "randomstring": "^1.1.5",
     "yargs": "^11.0.0"
   },
   "engines": {
     "node": ">=8.0.0",
-    "yarn": ">=1.0.0"
+    "yarn": ">=1.5.0"
   }
 }

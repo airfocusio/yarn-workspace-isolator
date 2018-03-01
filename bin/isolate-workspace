@@ -1,95 +1,82 @@
 #!/usr/bin/env node
 
-const { flatten, pickBy, intersection, intersectionBy } = require('lodash')
+const { flatten, mapValues, uniq } = require('lodash')
 const path = require('path')
-const randomstring = require('randomstring')
 const yargs = require('yargs')
-const { readFileAsync, writeFileAsync, renameAsync, unlinkAsync, globAsync } = require('../src/fileSystemAsync')
-const runCommandAsync = require('../src/runCommandAsync')
+const { readFileAsync, writeFileAsync, copyDirAsync } = require('../src/fileSystemAsync')
+const { runCommandAsyncPipe } = require('../src/runCommandAsync')
 
 const cli = yargs
-  .option('w', { alias: 'workspace', type: 'string' })
-  .coerce('w', path.resolve)
-  .demandOption(['w'])
+  .option('w', { alias: 'workspaceName', type: 'string' })
+  .option('o', { alias: 'outputFolder', type: 'string' })
+  .coerce('o', path.resolve)
+  .demandOption(['w', 'o'])
   .strict()
 
-async function run({ workspace: workspaceFolder }) {
+async function run({ workspaceName, outputFolder }) {
   const rootFolder = path.resolve('.')
-  const rootPackageJsonFile = path.join(rootFolder, 'package.json')
-  const rootPackageJson = JSON.parse(await readFileAsync(rootPackageJsonFile))
+  const workspaces = await getWorkspaceInfo(rootFolder)
+  const workspace = workspaces[workspaceName]
+  const workspaceDependencies = getWorkspaceDependencies(workspaces, workspaceName)
 
-  try {
-    const workspaceFolders = await Promise.all(rootPackageJson.workspaces.map(glob => globAsync(glob))).then(flatten)
-    const workspaces = await Promise.all(
-      workspaceFolders.map(async workspaceFolder => {
-        const packageJson = JSON.parse(await readFileAsync(path.resolve(workspaceFolder, 'package.json')))
-        return {
-          folder: path.resolve(workspaceFolder),
-          name: packageJson.name,
-          version: packageJson.version,
-        }
-      })
-    )
+  await copyDirAsync(path.join(rootFolder, workspace.location), outputFolder, filterIgnored)
+  await localizeWorkspaceDependencies(
+    path.join(outputFolder, 'package.json'),
+    workspaces,
+    path.join(outputFolder, 'node_modules')
+  )
 
-    const rootPackageJsonNoWorkspaces = {
-      ...rootPackageJson,
-      workspaces: undefined,
-    }
-
-    const workspacePackageJsonFile = path.join(workspaceFolder, 'package.json')
-    const workspacePackageJson = JSON.parse(await readFileAsync(workspacePackageJsonFile))
-
-    const deps = Object.keys(workspacePackageJson.dependencies)
-    const workspaceDeps = workspaces.filter(ws => deps.indexOf(ws.name) >= 0)
-
-    await workspaceDeps.reduce(
-      (acc, workspaceDep) => acc.then(() => runCommandAsync(workspaceDep.folder, 'yarn', ['build'])),
-      Promise.resolve()
-    )
-
-    await withTemporaryContent(rootPackageJsonFile, JSON.stringify(rootPackageJsonNoWorkspaces, null, 2), async () => {
-      const workspacePackageJsonNoWorkspaceDeps = {
-        ...workspacePackageJson,
-        dependencies:
-          workspacePackageJson.dependencies &&
-          pickBy(workspacePackageJson.dependencies, (ver, dep) => !workspaceDeps.find(wd => wd.name === dep)),
-        devDependencies:
-          workspacePackageJson.devDependencies &&
-          pickBy(workspacePackageJson.devDependencies, (ver, dep) => !workspaceDeps.find(wd => wd.name === dep)),
-        peerDependencies:
-          workspacePackageJson.peerDependencies &&
-          pickBy(workspacePackageJson.peerDependencies, (ver, dep) => !workspaceDeps.find(wd => wd.name === dep)),
-        optionalDependencies:
-          workspacePackageJson.optionalDependencies &&
-          pickBy(workspacePackageJson.optionalDependencies, (ver, dep) => !workspaceDeps.find(wd => wd.name === dep)),
-      }
-
-      await withTemporaryContent(
-        workspacePackageJsonFile,
-        JSON.stringify(workspacePackageJsonNoWorkspaceDeps, null, 2),
-        async () => {
-          await runCommandAsync(workspaceFolder, 'yarn', ['install'])
-          await runCommandAsync(workspaceFolder, 'yarn', [
-            'add',
-            ...workspaceDeps.map(workspaceDep => 'file:' + workspaceDep.folder),
-          ])
-        }
+  await Promise.all(
+    workspaceDependencies.map(async wd => {
+      await copyDirAsync(
+        path.join(rootFolder, workspaces[wd].location),
+        path.join(outputFolder, 'node_modules', wd),
+        filterIgnored
+      )
+      await localizeWorkspaceDependencies(
+        path.join(outputFolder, 'node_modules', wd, 'package.json'),
+        workspaces,
+        path.join(outputFolder, 'node_modules')
       )
     })
-  } catch (err) {
-    console.error(err)
-  }
+  )
 }
-run(cli.argv)
 
-async function withTemporaryContent(file, content, fn) {
-  const nonce = randomstring.generate(8)
-  await renameAsync(file, file + '-' + nonce)
-  try {
-    await writeFileAsync(file, content)
-    await fn()
-  } finally {
-    await unlinkAsync(file)
-    await renameAsync(file + '-' + nonce, file)
-  }
+async function getWorkspaceInfo(rootFolder) {
+  const stdout = await runCommandAsyncPipe(rootFolder, 'yarn', ['--silent', 'workspaces', 'info'])
+  return JSON.parse(stdout.toString('utf8'))
 }
+
+function getWorkspaceDependencies(workspaces, workspaceName) {
+  const workspace = workspaces[workspaceName]
+  const subWorkspaceDependencies = flatten(
+    workspace.workspaceDependencies.map(w => getWorkspaceDependencies(workspaces, w))
+  )
+  const { workspaceDependencies } = workspace
+  return uniq([...subWorkspaceDependencies, ...workspaceDependencies])
+}
+
+async function localizeWorkspaceDependencies(packageJsonFile, workspaces, localNodeModulesFolder) {
+  const packageJson = JSON.parse(await readFileAsync(packageJsonFile))
+  const nextPackageJson = {
+    ...packageJson,
+    dependencies: mapValues(packageJson.dependencies || {}, (ver, dep) => {
+      if (!!workspaces[dep]) {
+        return 'file:' + path.join(localNodeModulesFolder, dep)
+      } else {
+        return ver
+      }
+    }),
+  }
+  await writeFileAsync(packageJsonFile, JSON.stringify(nextPackageJson, null, 2))
+}
+
+function filterIgnored(stat, filepath, filename) {
+  // TODO
+  return true
+}
+
+run(cli.argv).catch(err => {
+  console.error(err)
+  process.exit(1)
+})
