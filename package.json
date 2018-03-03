@@ -9,10 +9,19 @@
   "bin": {
     "isolate-workspace": "./bin/isolate-workspace"
   },
+  "scripts": {
+    "lint-fix": "yarn prettier --write",
+    "lint": "yarn prettier --list-different",
+    "prettier": "prettier 'bin/**/*.js' 'src/**/*.js'",
+    "test": "yarn lint"
+  },
   "dependencies": {
     "copy-dir": "^0.3.0",
     "lodash": "^4.17.5",
     "yargs": "^11.0.0"
+  },
+  "devDependencies": {
+    "prettier": "^1.11.1"
   },
   "engines": {
     "node": ">=8.0.0",
