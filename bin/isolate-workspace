@@ -9,21 +9,25 @@ const { runCommandAsyncPipe } = require('../src/runCommandAsync')
 const cli = yargs
   .option('w', { alias: 'workspaceName', type: 'string' })
   .option('o', { alias: 'outputFolder', type: 'string' })
+  .option('n', { alias: 'npmProjectFolder', type: 'string' })
   .coerce('o', path.resolve)
   .demandOption(['w', 'o'])
   .strict()
 
-async function run({ workspaceName, outputFolder }) {
+async function run({ workspaceName, outputFolder, npmProjectFolder }) {
   const rootFolder = path.resolve('.')
   const workspaces = await getWorkspaceInfo(rootFolder)
   const workspace = workspaces[workspaceName]
   const workspaceDependencies = getWorkspaceDependencies(workspaces, workspaceName)
 
+  const npmFolder = npmProjectFolder ?
+    path.join(npmProjectFolder, 'node_modules') : path.join(outputFolder, 'node_modules')
+
   await copyDirAsync(path.join(rootFolder, workspace.location), outputFolder, filterIgnored)
   await localizeWorkspaceDependencies(
     path.join(outputFolder, 'package.json'),
     workspaces,
-    path.join(outputFolder, 'node_modules')
+    npmFolder
   )
 
   await Promise.all(
@@ -36,7 +40,7 @@ async function run({ workspaceName, outputFolder }) {
       await localizeWorkspaceDependencies(
         path.join(outputFolder, 'node_modules', wd, 'package.json'),
         workspaces,
-        path.join(outputFolder, 'node_modules')
+        npmFolder
       )
     })
   )
