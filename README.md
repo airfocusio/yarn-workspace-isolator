@@ -19,4 +19,4 @@ cd my-project-using-yarn-workspaces
 isolate-workspace -w my-package-name -o ~/new-folder
 ```
 
-Note: This needs `yarn@>=1.50`!
+Note: This needs `yarn@>=1.5.0`!
